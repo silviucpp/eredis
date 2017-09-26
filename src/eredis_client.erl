@@ -84,7 +84,7 @@ init([Host, Port, Database, Password, ReconnectSleep, ConnectTimeout]) ->
         {ok, NewState} ->
             {ok, NewState};
         {error, Reason} ->
-            {stop, {connection_error, Reason}}
+            {stop, Reason}
     end.
 
 handle_call({request, Req}, From, State) ->
@@ -305,8 +305,9 @@ safe_send(Pid, Value) ->
 %% returns something we don't expect, we crash. Returns {ok, State} or
 %% {SomeError, Reason}.
 connect(State) ->
-    case gen_tcp:connect(State#state.host, State#state.port,
-                         ?SOCKET_OPTS, State#state.connect_timeout) of
+    {ok, {AFamily, Addr}} = get_addr(State#state.host),
+    case gen_tcp:connect(Addr, State#state.port,
+                         [AFamily | ?SOCKET_OPTS], State#state.connect_timeout) of
         {ok, Socket} ->
             case authenticate(Socket, State#state.password) of
                 ok ->
@@ -323,6 +324,21 @@ connect(State) ->
             {error, {connection_error, Reason}}
     end.
 
+get_addr(Hostname) ->
+    case inet:parse_address(Hostname) of
+        {ok, {_,_,_,_} = Addr} ->         {ok, {inet, Addr}};
+        {ok, {_,_,_,_,_,_,_,_} = Addr} -> {ok, {inet6, Addr}};
+        {error, einval} ->
+            case inet:getaddr(Hostname, inet6) of
+                 {error, _} ->
+                     case inet:getaddr(Hostname, inet) of
+                         {ok, Addr}-> {ok, {inet, Addr}};
+                         {error, _} = Res -> Res
+                     end;
+                 {ok, Addr} -> {ok, {inet6, Addr}}
+            end
+    end.
+
 select_database(_Socket, undefined) ->
     ok;
 select_database(_Socket, <<"0">>) ->
@@ -333,7 +349,7 @@ select_database(Socket, Database) ->
 authenticate(_Socket, <<>>) ->
     ok;
 authenticate(Socket, Password) ->
-    do_sync_command(Socket, ["AUTH", " ", Password, "\r\n"]).
+    do_sync_command(Socket, ["AUTH", " \"", Password, "\"\r\n"]).
 
 %% @doc: Executes the given command synchronously, expects Redis to
 %% return "+OK\r\n", otherwise it will fail.
@@ -359,8 +375,10 @@ do_sync_command(Socket, Command) ->
 reconnect_loop(Client, #state{reconnect_sleep = ReconnectSleep} = State) ->
     case catch(connect(State)) of
         {ok, #state{socket = Socket}} ->
+            Client ! {connection_ready, Socket},
             gen_tcp:controlling_process(Socket, Client),
-            Client ! {connection_ready, Socket};
+            Msgs = get_all_messages([]),
+            [Client ! M || M <- Msgs];
         {error, _Reason} ->
             timer:sleep(ReconnectSleep),
             reconnect_loop(Client, State);
@@ -376,3 +394,12 @@ read_database(undefined) ->
     undefined;
 read_database(Database) when is_integer(Database) ->
     list_to_binary(integer_to_list(Database)).
+
+
+get_all_messages(Acc) ->
+    receive
+        M ->
+            [M | Acc]
+    after 0 ->
+        lists:reverse(Acc)
+    end.

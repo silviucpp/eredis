@@ -59,7 +59,7 @@ init([Host, Port, Password, ReconnectSleep, MaxQueueSize, QueueBehaviour]) ->
             ok = inet:setopts(NewState#state.socket, [{active, once}]),
             {ok, NewState};
         {error, Reason} ->
-            {stop, {connection_error, Reason}}
+            {stop, Reason}
     end.
 
 %% Set the controlling process. All messages on all channels are directed here.
@@ -326,7 +326,7 @@ connect(State) ->
 authenticate(_Socket, <<>>) ->
     ok;
 authenticate(Socket, Password) ->
-    eredis_client:do_sync_command(Socket, ["AUTH", " ", Password, "\r\n"]).
+    eredis_client:do_sync_command(Socket, ["AUTH", " \"", Password, "\"\r\n"]).
 
 
 %% @doc: Loop until a connection can be established, this includes
