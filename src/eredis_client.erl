@@ -151,7 +151,7 @@ handle_info({tcp_error, _Socket, _Reason}, State) ->
 %% notify us when Redis is ready. In the meantime, we can respond with
 %% an error message to all our clients.
 handle_info({tcp_closed, _Socket}, State) ->
-    maybe_reconnect(tcp_closed, State);
+    maybe_reconnect({tcp_error, tcp_closed}, State);
 
 %% Redis is ready to accept requests, the given Socket is a socket
 %% already connected and authenticated.
@@ -201,7 +201,7 @@ do_request(Req, From, State) ->
             NewQueue = queue:in({1, From}, State#state.queue),
             {noreply, State#state{queue = NewQueue}};
         {error, Reason} ->
-            {reply, {error, Reason}, State}
+            {reply, {error, {tcp_error, Reason}}, State}
     end.
 
 -spec do_pipeline(Pipeline::pipeline(), From::pid(), #state{}) ->
@@ -217,7 +217,7 @@ do_pipeline(Pipeline, From, State) ->
             NewQueue = queue:in({length(Pipeline), From, []}, State#state.queue),
             {noreply, State#state{queue = NewQueue}};
         {error, Reason} ->
-            {reply, {error, Reason}, State}
+            {reply, {error, {tcp_error, Reason}}, State}
     end.
 
 -spec handle_response(Data::binary(), State::#state{}) -> NewState::#state{}.
@@ -374,7 +374,7 @@ do_sync_command(Socket, Command) ->
                     {error, {unexpected_data, Other}}
             end;
         {error, Reason} ->
-            {error, Reason}
+            {error, {tcp_error, Reason}}
     end.
 
 maybe_reconnect(Reason, #state{reconnect_sleep = no_reconnect, queue = Queue} = State) ->
