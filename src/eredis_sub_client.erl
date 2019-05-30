@@ -180,8 +180,8 @@ handle_info({tcp_closed, _Socket}, State) ->
     spawn(fun() -> reconnect_loop(Self, State) end),
 
     %% Throw away the socket. The absence of a socket is used to
-    %% signal we are "down"
-    {noreply, State#state{socket = undefined}};
+    %% signal we are "down"; discard possibly patrially parsed data
+    {noreply, State#state{socket = undefined, parser_state = eredis_parser:init()}};
 
 %% Controller might want to be notified about every reconnect attempt
 handle_info(reconnect_attempt, State) ->
@@ -310,7 +310,7 @@ queue_or_send(Msg, State) ->
 %% synchronous and if Redis returns something we don't expect, we
 %% crash. Returns {ok, State} or {error, Reason}.
 connect(State) ->
-    case gen_tcp:connect(State#state.host, State#state.port, ?SOCKET_OPTS) of
+    case gen_tcp:connect(State#state.host, State#state.port, [?SOCKET_MODE | ?SOCKET_OPTS]) of
         {ok, Socket} ->
             case authenticate(Socket, State#state.password) of
                 ok ->
@@ -354,5 +354,4 @@ reconnect_loop(Client, #state{reconnect_sleep=ReconnectSleep}=State) ->
 send_to_controller(_Msg, #state{controlling_process=undefined}) ->
     ok;
 send_to_controller(Msg, #state{controlling_process={_Ref, Pid}}) ->
-    %%error_logger:info_msg("~p ! ~p~n", [Pid, Msg]),
     Pid ! Msg.
